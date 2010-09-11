@@ -35,9 +35,9 @@ def parse_check_line(line):
     return bool(m.group(1).strip()), m.group(2).decode("utf-8")
 
 FRESH = 0
-NEED = 1
-CHECKED = 2
-NOT_NEED = 3
+NOT_NEEDED = 1
+NEED = 2
+CHECKED = 3
 
 CHECK_FIELD_WIDTH = 60
 ITEM_HEIGHT = 60
@@ -52,13 +52,13 @@ def parse_data(s):
         if state == "notstarted":
             if not re.match(r"\*\s*ALL", line):
                 raise ParseError("expected * ALL, got %r" % line)
-            state = "not_need"
-        elif state == "not_need":
+            state = "not_needed"
+        elif state == "not_needed":
             if re.match(r"\*\*\s*NEED", line):
                 state = "need"
                 continue
             checked, title = parse_check_line(line)
-            yield NOT_NEED, title
+            yield NOT_NEEDED, title
         elif state == "need":
             checked, title = parse_check_line(line)
             if checked:
@@ -69,11 +69,11 @@ def parse_data(s):
 def serialize_data(data, out):
     print >>out, "* ALL"
     for state, title in data:
-        if state == NOT_NEED:
+        if state == NOT_NEEDED:
             print >>out, "  - [ ] %s" % title.encode("utf-8")
     print >>out, "** NEED"
     for state, title in data:
-        if state == NOT_NEED:
+        if state == NOT_NEEDED:
             continue
         print >>out, "   - [%s] %s" % \
             ("X" if state == CHECKED else " ", title.encode("utf-8"))
@@ -133,7 +133,7 @@ class CheckBoxDelegate(QStyledItemDelegate):
         opts = QStyleOptionButton() # QtGui.QStyleOptionViewItem()
         opts.rect = option.rect
         se_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, opts)
-        if data == NOT_NEED:
+        if data == NOT_NEEDED:
             bullet_rect = QRect(se_rect)
             if bullet_rect.width() > BULLET_SIZE:
                 bullet_rect.setLeft(
@@ -259,7 +259,7 @@ class CheckListModel(QSortFilterProxyModel):
             value = int(index.data().toPyObject())
             if checkout:
                 if value == CHECKED:
-                    self.model.setData(index, NOT_NEED)
+                    self.model.setData(index, NOT_NEEDED)
             else:
                 if value == FRESH:
                     self.model.setData(index, NEED)
@@ -292,12 +292,12 @@ class CheckListModel(QSortFilterProxyModel):
 
     def toggle(self, row):
         value = int(self.index(row, 0).data().toPyObject())
-        if value in (FRESH, NOT_NEED):
+        if value in (FRESH, NOT_NEEDED):
             value = NEED
         elif value == NEED:
             value = CHECKED
         elif self.show_all:
-            value = NOT_NEED
+            value = NOT_NEEDED
         else:
             value = NEED
         self.setData(self.index(row, 0), value)
