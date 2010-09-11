@@ -160,6 +160,7 @@ class CheckBoxDelegate(QStyledItemDelegate):
         style.drawPrimitive(QStyle.PE_IndicatorCheckBox, opts, painter)
 
 class CheckListModel(QSortFilterProxyModel):
+    # FIXME: should not use the proxy. just implement the real model
     def __init__(self, parent=None):
         super(CheckListModel, self).__init__(parent)
         self.settings = QSettings("fionbio", "i4checklist")
@@ -171,7 +172,7 @@ class CheckListModel(QSortFilterProxyModel):
         self.load_db_list()
         self.load()
         self.connect(model, SIGNAL("dataChanged(QModelIndex, QModelIndex)"),
-                    self._dataChanged)
+                     self._dataChanged)
         self.save_timer = QTimer()
         self.save_timer.setSingleShot(True)
         self.save_timer.setInterval(SAVE_INTERVAL_MS)
@@ -253,8 +254,7 @@ class CheckListModel(QSortFilterProxyModel):
             self._updatePending = True
             QTimer.singleShot(1, self.cleanup)
         elif top_left.column() <= 1 and bottom_right.column() >= 1:
-            QTimer.singleShot(1, self.invalidate)
-            self.invalidate()
+            pass # TBD: fix this
         self.save_timer.start()
 
     def cleanup(self, checkout=False):
@@ -278,6 +278,7 @@ class CheckListModel(QSortFilterProxyModel):
 
     def lessThan(self, left, right):
         r = super(CheckListModel, self).lessThan(left, right)
+        log.debug("left %d %d right %d %d" % (left.row(), left.column(), right.row(), right.column()))
         if r or left.column() or right.column():
             return r
         if super(CheckListModel, self).lessThan(right, left):
@@ -413,9 +414,8 @@ class I4CheckWindow(QWidget):
         self.model.set_show_all(show_all)
         self.tableview.resizeRowsToContents()
 
-    def closeEvent(self, event):
+    def save(self):
         self.model.save()
-        super(I4CheckWindow, self).closeEvent(event)
 
     def checkout(self):
         if QMessageBox.question(
@@ -492,6 +492,10 @@ class I4CheckMainWindow(QMainWindow):
         self.setCentralWidget(self.checklist)
         self.setup_menu()
         self.setAttribute(Qt.WA_Maemo5AutoOrientation)
+
+    def closeEvent(self, event):
+        self.checklist.save()
+        super(I4CheckMainWindow, self).closeEvent(event)
 
     def setup_menu(self):
         self.act_checkout = QAction(self.tr('Checkout'), self)
