@@ -10,7 +10,8 @@ from PyQt4.QtGui import QApplication, QStyledItemDelegate, QPalette, \
     QStyle, QStyleOptionButton, QPen, QWidget, QStandardItemModel, \
     QStandardItem, QTableView, QAbstractItemView, QPushButton, \
     QVBoxLayout, QHBoxLayout, QRadioButton, QSortFilterProxyModel, \
-    QFont, QHeaderView, QMessageBox, QComboBox, QLabel, QInputDialog
+    QFont, QHeaderView, QMessageBox, QComboBox, QLabel, QInputDialog, \
+    QMainWindow, QAction
 
 log = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ class CheckListModel(QSortFilterProxyModel):
     def db_dir(self):
         return os.path.expanduser("~/MyDocs/.i4checklist")
 
-    def load_db_list(self):
+    def load_db_list(self, ignore_current=False):
         self.databases = []
         for filename in sorted(os.listdir(self.db_dir())):
             path = os.path.join(self.db_dir(), filename)
@@ -192,6 +193,8 @@ class CheckListModel(QSortFilterProxyModel):
         if not self.databases:
             self.databases = ["default"]
         self.current_db = self.databases[0]
+        if ignore_current:
+            return
         self.settings.beginGroup("database")
         try:
             if self.settings.contains("current"):
@@ -236,6 +239,13 @@ class CheckListModel(QSortFilterProxyModel):
         with open(path, "wt+") as f:
             serialize_data(data, f)
         self.save_timer.stop()
+
+    def delete_database(self):
+        path = os.path.join(self.db_dir(), self.current_db)
+        if os.path.exists(path):
+            os.unlink(path)
+        self.load_db_list(True)
+        self.load()
 
     def _dataChanged(self, top_left, bottom_right):
         log.debug("_dataChanged")
@@ -308,7 +318,6 @@ class CheckListModel(QSortFilterProxyModel):
 class I4CheckWindow(QWidget):
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
-        self.setWindowTitle("i4checklist")
         self.setup_model()
 
         self.tableview = QTableView()
@@ -416,6 +425,16 @@ class I4CheckWindow(QWidget):
             QMessageBox.Yes:
             self.model.checkout()
 
+    def delete_database(self):
+        if QMessageBox.question(
+            self, "Delete database",
+            "Are you sure you want to delete the current database?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == \
+            QMessageBox.Yes:
+            self.model.delete_database()
+            self.populate_db_combo()
+            self.dwim_after_load()
+
     _loading_db_combo = False
 
     def populate_db_combo(self):
@@ -466,7 +485,31 @@ class I4CheckWindow(QWidget):
         self.populate_db_combo()
         self.dwim_after_load()
 
-# TBD: save current db name
+class I4CheckMainWindow(QMainWindow):
+    def __init__(self):
+        super(I4CheckMainWindow, self).__init__()
+        self.setWindowTitle("i4checklist")
+        self.checklist = I4CheckWindow()
+        self.setCentralWidget(self.checklist)
+        self.setup_menu()
+
+    def setup_menu(self):
+        self.act_del_db = QAction(self.tr('Delete database'), self)
+        self.act_del_db.triggered.connect(self.checklist.delete_database)
+        self.act_about = QAction(self.tr('About'), self)
+        self.act_about.triggered.connect(self.about)
+
+        menu_bar = self.menuBar()
+        menu_bar.addAction(self.act_del_db)
+        menu_bar.addAction(self.act_about)
+
+    def about(self):
+        QMessageBox.information(
+            self, "About i4checklist",
+            "Shopping list and check list application \n"
+            "inspired by Handy Shopper for Palm OS.\n\n"
+            "(c) Copyright Ivan Shvedunov 2010")
+
 # TBD: disable checkout button when there are no checked items
 # TBD: remove/separate test code
 # TBD: reduce N of redundant saves
@@ -478,6 +521,6 @@ class I4CheckWindow(QWidget):
 #test_it()
 logging.basicConfig(level=logging.DEBUG)
 app = QApplication(sys.argv)
-widget = I4CheckWindow()
+widget = I4CheckMainWindow()
 widget.show()
 sys.exit(app.exec_())
