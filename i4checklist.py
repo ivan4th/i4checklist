@@ -209,7 +209,7 @@ class CheckListModel(QSortFilterProxyModel):
             self.current_db = db_name
         path = os.path.join(self.db_dir(), self.current_db)
         log.debug("load(): %s" % path)
-        self.model.clear()
+        self.model.removeRows(0, self.model.rowCount())
         if not os.path.exists(path):
             return
         with open(path) as f:
@@ -304,24 +304,26 @@ class I4CheckWindow(QWidget):
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
         self.setWindowTitle("i4checklist")
-        _edit_index = self.setup_model()
+        self.setup_model()
 
         self.tableview = QTableView()
         self.tableview.setSelectionMode(QAbstractItemView.NoSelection)
         self.tableview.setEditTriggers(QAbstractItemView.DoubleClicked)
-        self.tableview.setColumnWidth(0, 250)
-        self.tableview.verticalHeader().hide()
         self.cbdelegate = CheckBoxDelegate()
         self.tableview.setItemDelegate(self.cbdelegate)
         self.tableview.setModel(self.model)
         self.tableview.sortByColumn(0, Qt.AscendingOrder)
-        self.adjust_sizes()
+        self.adjust_headers()
         self.connect(self.tableview,
                      SIGNAL("clicked(const QModelIndex&)"),
                      self.item_clicked)
+        if self.model.model.rowCount() == 0:
+            edit_index = self.model.new()
+            self.tableview.setCurrentIndex(edit_index)
+            self.tableview.edit(edit_index)
 
-        self.model.setHeaderData(0, Qt.Horizontal, u"")
-        self.model.setHeaderData(1, Qt.Horizontal, u"Title")
+        #self.model.setHeaderData(0, Qt.Horizontal, u"")
+        #self.model.setHeaderData(1, Qt.Horizontal, u"Title")
 
         self.radio_all = QRadioButton("All")
         self.radio_need = QRadioButton("Need")
@@ -358,31 +360,18 @@ class I4CheckWindow(QWidget):
         self.box.addLayout(self.button_box)
 
         self.setAttribute(Qt.WA_Maemo5AutoOrientation)
-        # self.box.addWidget(QtGui.QCheckBox("zzzz"))
 
-        if _edit_index:
-            # FIXME: QTableView is unable to set proper column/row sizes when it
-            # starts with an empty model
-            self.tableview.setCurrentIndex(_edit_index)
-            self.tableview.resizeRowToContents(_edit_index.row())
-            self.tableview.edit(_edit_index)
-
-    def adjust_sizes(self):
+    def adjust_headers(self):
         log.debug("adjust_sizes()")
-        # TBD: I don't quite understand how to avoid the need
-        # to call this repeatedly ... perhaps QSS should be used
-        self.tableview.resizeColumnToContents(1)
-        self.tableview.resizeRowsToContents()
+        self.tableview.setColumnWidth(0, CHECK_FIELD_WIDTH)
         self.tableview.horizontalHeader().setResizeMode(1, QHeaderView.Stretch)
-        self.tableview.horizontalHeader().resizeSection(1, 1)
+        self.tableview.setColumnWidth(1, 1)
+        self.tableview.verticalHeader().setDefaultSectionSize(ITEM_HEIGHT)
+        self.tableview.verticalHeader().hide()
         self.tableview.horizontalHeader().hide()
-        self.tableview.resizeColumnToContents(0)
 
     def setup_model(self):
         self.model = CheckListModel()
-        if not self.model.rowCount():
-            return self.model.new()
-        return None
 
     def item_clicked(self, index):
         if index.column() > 0:
@@ -436,17 +425,26 @@ class I4CheckWindow(QWidget):
             return
         if db_name:
             self.model.load(db_name)
-            self.adjust_sizes()
+            if not self.model.rowCount():
+                _edit_index = self.model.new()
+                self.tableview.setCurrentIndex(_edit_index)
+                self.tableview.resizeRowToContents(_edit_index.row())
+                self.tableview.edit(_edit_index)
             return
 
         db_name, ok = QInputDialog.getText(
             self, "New Database", "Enter database name")
-        if ok and not re.match(r"^[\w-]+$", db_name):
-            QMessageBox.critical(
-                self, "Error",
-                "Database name must contain only the following chars: "
-                "A-Z a-z 0-9 _ -")
-            ok = False
+        if ok:
+            if not re.match(r"^[\w-]+$", db_name):
+                QMessageBox.critical(
+                    self, "Error",
+                    "Database name must contain only the following chars: "
+                    "A-Z a-z 0-9 _ -")
+                ok = False
+            elif db_name in self.model.databases:
+                QMessageBox.critical(
+                    self, "Error", "Database '%s' already exists" % db_name)
+                ok = False
         if not ok:
             self.db_combo.setCurrentIndex(
                 self.model.databases.index(self.model.current_db))
@@ -454,8 +452,11 @@ class I4CheckWindow(QWidget):
         db_name = str(db_name) + ".org"
         self.model.load(db_name)
         self.populate_db_combo()
-        self.adjust_sizes()
+        edit_index = self.model.new()
+        self.tableview.setCurrentIndex(edit_index)
+        self.tableview.edit(edit_index)
 
+# TBD: save current db name
 # TBD: validate db names
 # TBD: remove/separate test code
 # TBD: reduce N of redundant saves
