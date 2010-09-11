@@ -340,8 +340,8 @@ class I4CheckWindow(QWidget):
         self.radio_need.setChecked(True)
         self.connect(self.radio_all, SIGNAL("toggled(bool)"), self.set_show_all)
 
-        label = QLabel("Database:")
-        label.setFixedWidth(120)
+        label = QLabel("DB:")
+        label.setFixedWidth(40)
         label.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
 
         self.db_combo = QComboBox()
@@ -350,26 +350,25 @@ class I4CheckWindow(QWidget):
             self.db_combo, SIGNAL("currentIndexChanged(int)"),
             self.db_index_changed)
 
-        self.new_button = QPushButton("Add")
+        self.new_button = QPushButton("New")
         self.connect(self.new_button, SIGNAL("clicked()"), self.new_item)
-        self.checkout_button = QPushButton("Checkout")
-        self.connect(self.checkout_button, SIGNAL("clicked()"), self.checkout)
 
         self.box = QVBoxLayout(self)
-        self.top_box = QHBoxLayout()
-        self.top_box.setSpacing(0)
-        self.top_box.addWidget(self.radio_all)
-        self.top_box.addWidget(self.radio_need)
-        self.top_box.addWidget(label)
-        self.top_box.addWidget(self.db_combo)
-        self.box.addLayout(self.top_box)
         self.box.addWidget(self.tableview)
         self.button_box = QHBoxLayout()
-        self.button_box.addWidget(self.checkout_button)
+        self.button_box.setSpacing(0)
         self.button_box.addWidget(self.new_button)
+        self.button_box.addWidget(self.radio_all)
+        self.button_box.addWidget(self.radio_need)
+        self.button_box.addWidget(label)
+        self.button_box.addWidget(self.db_combo)
         self.box.addLayout(self.button_box)
 
-        self.setAttribute(Qt.WA_Maemo5AutoOrientation)
+        # self.setStyleSheet("""
+        # QComboBox {
+        #     font-size: 16px;
+        # }
+        # """)
 
         self.dwim_after_load()
 
@@ -492,14 +491,17 @@ class I4CheckMainWindow(QMainWindow):
         self.checklist = I4CheckWindow()
         self.setCentralWidget(self.checklist)
         self.setup_menu()
+        self.setAttribute(Qt.WA_Maemo5AutoOrientation)
 
     def setup_menu(self):
+        self.act_checkout = QAction(self.tr('Checkout'), self)
+        self.act_checkout.triggered.connect(self.checklist.checkout)
         self.act_del_db = QAction(self.tr('Delete database'), self)
         self.act_del_db.triggered.connect(self.checklist.delete_database)
         self.act_about = QAction(self.tr('About'), self)
         self.act_about.triggered.connect(self.about)
-
         menu_bar = self.menuBar()
+        menu_bar.addAction(self.act_checkout)
         menu_bar.addAction(self.act_del_db)
         menu_bar.addAction(self.act_about)
 
