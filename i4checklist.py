@@ -7,7 +7,7 @@ from PyQt4.QtCore import Qt, QRect, SIGNAL
 from PyQt4.QtGui import QApplication, QStyledItemDelegate, QPalette, \
     QStyle, QStyleOptionButton, QPen, QWidget, QStandardItemModel, \
     QStandardItem, QTreeView, QAbstractItemView, QPushButton, \
-    QVBoxLayout, QSortFilterProxyModel
+    QVBoxLayout, QSortFilterProxyModel, QFont
 
 SAMPLE_DATA = """
 * ALL
@@ -58,31 +58,43 @@ class CheckBoxDelegate(QStyledItemDelegate):
         return None
 
     def paint(self, painter, option, index):
-        # print >>sys.stderr, "CheckBoxDelegate.paint(%d, %d, %d, %d)" % \
-        #     (option.rect.left(), option.rect.top(),
-        #      option.rect.width(), option.rect.height())
         self.initStyleOption(option, index)
+        if index.column() > 0:
+            self.paint_text(painter, option, index)
+        else:
+            self.paint_checkbox(painter, option, index)
+
+    def paint_text(self, painter, option, index):
+        if int(index.model().index(index.row(), 0).data().toPyObject()) == \
+                CHECKED:
+            option.font = QFont(option.font)
+            option.font.setStrikeOut(True)
+        QApplication.style().drawControl(
+            QStyle.CE_ItemViewItem, option, painter,
+            getattr(option, "widget", None))
+
+    def paint_checkbox(self, painter, option, index):
         style = QApplication.style()
-        brush = option.palette.brush(QPalette.Base)
-        painter.fillRect(option.rect, brush)
+        option.text = ""
+        style.drawControl(
+            QStyle.CE_ItemViewItem, option, painter,
+            getattr(option, "widget", None))
         opts = QStyleOptionButton() # QtGui.QStyleOptionViewItem()
         opts.rect = option.rect
         data = int(index.data().toPyObject())
         se_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, opts)
         if data == NOT_NEEDED:
-            bullet_rect = QRect(se_rect.x(), se_rect.y(), # FIXME
-                                se_rect.width(), se_rect.height())
+            bullet_rect = QRect(se_rect)
             if bullet_rect.width() > BULLET_SIZE:
                 bullet_rect.setLeft(
-                    bullet_rect.left() + (bullet_rect.width() - BULLET_SIZE) / 2)
+                    bullet_rect.left() +
+                    (bullet_rect.width() - BULLET_SIZE) / 2)
                 bullet_rect.setWidth(BULLET_SIZE)
             if bullet_rect.height() > BULLET_SIZE:
                 bullet_rect.setTop(
-                    bullet_rect.top() + (bullet_rect.height() - BULLET_SIZE) / 2)
+                    bullet_rect.top() +
+                    (bullet_rect.height() - BULLET_SIZE) / 2)
                 bullet_rect.setHeight(BULLET_SIZE)
-            # print >>sys.stderr, "bullet_rect = QRect(%d, %d, %d, %d)" % \
-            #     (bullet_rect.left(), bullet_rect.top(),
-            #      bullet_rect.width(), bullet_rect.height())
             painter.save()
             painter.setPen(QPen(option.palette.color(QPalette.Text)))
             painter.setBrush(option.palette.brush(QPalette.Text))
@@ -90,14 +102,11 @@ class CheckBoxDelegate(QStyledItemDelegate):
             painter.restore()
             return
         if data == CHECKED:
-            # print >>sys.stderr, "on!"
             opts.state |= QStyle.State_On | QStyle.State_Enabled
         else:
-            # print >>sys.stderr, "off!"
             opts.state |= QStyle.State_Off | QStyle.State_Enabled
         opts.rect = se_rect
         style.drawPrimitive(QStyle.PE_IndicatorCheckBox, opts, painter)
-        # print >>sys.stderr, "out"
 
 class CheckProxyModel(QSortFilterProxyModel):
     def __init__(self, model, parent=None):
@@ -146,7 +155,8 @@ class I4CheckWindow(QWidget):
           #self.treeview.setAlternatingRowColors(True)
         self.treeview.setColumnWidth(0, 250)
         self.cbdelegate = CheckBoxDelegate()
-        self.treeview.setItemDelegateForColumn(0, self.cbdelegate)
+        # self.treeview.setItemDelegateForColumn(0, self.cbdelegate)
+        self.treeview.setItemDelegate(self.cbdelegate)
         self.treeview.setModel(self.proxy_model)
         # FIXME: sortByColumn(0, ...) here is not a real solution
         # as we need to sort by name too
@@ -169,7 +179,9 @@ class I4CheckWindow(QWidget):
             return
         value = self.proxy_model.index(index.row(), 0).data().toPyObject()
         value = (int(value) + 1) % 3 # FIXME
+        cur_index = self.treeview.currentIndex()
         self.proxy_model.setData(self.proxy_model.index(index.row(), 0), value)
+        self.treeview.setCurrentIndex(cur_index) # don't scroll to the item
 
     def zzzz(self):
         print >>sys.stderr, "ZZZZZ"
@@ -182,5 +194,3 @@ sys.exit(app.exec_())
 
 #from cStringIO import StringIO
 #print repr(list(parse_data(StringIO(SAMPLE_DATA))))
-# TBD: should implement custom model
-# TBD: should use a QFont with setStrikeOut(True) for checked items as Qt::FontRole
