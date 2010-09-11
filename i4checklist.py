@@ -195,7 +195,7 @@ class CheckListModel(QSortFilterProxyModel):
         self.settings.beginGroup("database")
         try:
             if self.settings.contains("current"):
-                cur = self.settings.value("current")
+                cur = str(self.settings.value("current").toPyObject())
                 if cur in self.databases:
                     self.current_db = cur
         finally:
@@ -207,6 +207,11 @@ class CheckListModel(QSortFilterProxyModel):
                 self.databases.append(db_name)
                 self.databases.sort()
             self.current_db = db_name
+            self.settings.beginGroup("database")
+            try:
+                self.settings.setValue("current", self.current_db)
+            finally:
+                self.settings.endGroup()
         path = os.path.join(self.db_dir(), self.current_db)
         log.debug("load(): %s" % path)
         self.model.removeRows(0, self.model.rowCount())
