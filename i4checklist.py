@@ -317,10 +317,6 @@ class I4CheckWindow(QWidget):
         self.connect(self.tableview,
                      SIGNAL("clicked(const QModelIndex&)"),
                      self.item_clicked)
-        if self.model.model.rowCount() == 0:
-            edit_index = self.model.new()
-            self.tableview.setCurrentIndex(edit_index)
-            self.tableview.edit(edit_index)
 
         #self.model.setHeaderData(0, Qt.Horizontal, u"")
         #self.model.setHeaderData(1, Qt.Horizontal, u"Title")
@@ -360,6 +356,18 @@ class I4CheckWindow(QWidget):
         self.box.addLayout(self.button_box)
 
         self.setAttribute(Qt.WA_Maemo5AutoOrientation)
+
+        self.dwim_after_load()
+
+    def dwim_after_load(self):
+        if self.model.rowCount() > 0:
+            self.radio_need.setChecked(True)
+            return
+        self.radio_all.setChecked(True)
+        if self.model.model.rowCount() == 0:
+            edit_index = self.model.new()
+            self.tableview.setCurrentIndex(edit_index)
+            self.tableview.edit(edit_index)
 
     def adjust_headers(self):
         log.debug("adjust_sizes()")
@@ -423,13 +431,12 @@ class I4CheckWindow(QWidget):
         db_name = str(self.db_combo.itemData(index).toPyObject())
         if db_name == self.model.current_db:
             return
+
+        self.model.save()
+
         if db_name:
             self.model.load(db_name)
-            if not self.model.rowCount():
-                _edit_index = self.model.new()
-                self.tableview.setCurrentIndex(_edit_index)
-                self.tableview.resizeRowToContents(_edit_index.row())
-                self.tableview.edit(_edit_index)
+            self.dwim_after_load()
             return
 
         db_name, ok = QInputDialog.getText(
@@ -452,17 +459,16 @@ class I4CheckWindow(QWidget):
         db_name = str(db_name) + ".org"
         self.model.load(db_name)
         self.populate_db_combo()
-        edit_index = self.model.new()
-        self.tableview.setCurrentIndex(edit_index)
-        self.tableview.edit(edit_index)
+        self.dwim_after_load()
 
 # TBD: save current db name
-# TBD: validate db names
+# TBD: disable checkout button when there are no checked items
 # TBD: remove/separate test code
 # TBD: reduce N of redundant saves
 # TBD: main menu (remove database, etc.)
 # TBD: style using qss
 # TBD: don't crash on parse errors
+# TBD: invent more convenient org format
 
 #test_it()
 logging.basicConfig(level=logging.DEBUG)
