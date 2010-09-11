@@ -5,12 +5,12 @@ import re
 import sys
 import os.path
 #from PySide import QtCore, QtGui #, QtMaemo5
-from PyQt4.QtCore import Qt, QRect, QSize, QTimer, QRegExp, SIGNAL
+from PyQt4.QtCore import Qt, QRect, QSize, QTimer, QRegExp, QSettings, SIGNAL
 from PyQt4.QtGui import QApplication, QStyledItemDelegate, QPalette, \
     QStyle, QStyleOptionButton, QPen, QWidget, QStandardItemModel, \
     QStandardItem, QTableView, QAbstractItemView, QPushButton, \
     QVBoxLayout, QHBoxLayout, QRadioButton, QSortFilterProxyModel, \
-    QFont, QHeaderView, QMessageBox
+    QFont, QHeaderView, QMessageBox, QComboBox, QLabel, QInputDialog
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ SAMPLE_DATA = """* ALL
   - [ ] item two
   - [ ] item three
   - [ ] item four
-** NEEDED
+** NEED
    - [ ] item five
    - [X] item six
    - [X] item seven
@@ -35,9 +35,9 @@ def parse_check_line(line):
     return bool(m.group(1).strip()), m.group(2).decode("utf-8")
 
 FRESH = 0
-NEEDED = 1
+NEED = 1
 CHECKED = 2
-NOT_NEEDED = 3
+NOT_NEED = 3
 
 CHECK_FIELD_WIDTH = 60
 ITEM_HEIGHT = 60
@@ -52,28 +52,28 @@ def parse_data(s):
         if state == "notstarted":
             if not re.match(r"\*\s*ALL", line):
                 raise ParseError("expected * ALL, got %r" % line)
-            state = "not_needed"
-        elif state == "not_needed":
-            if re.match(r"\*\*\s*NEEDED", line):
-                state = "needed"
+            state = "not_need"
+        elif state == "not_need":
+            if re.match(r"\*\*\s*NEED", line):
+                state = "need"
                 continue
             checked, title = parse_check_line(line)
-            yield NOT_NEEDED, title
-        elif state == "needed":
+            yield NOT_NEED, title
+        elif state == "need":
             checked, title = parse_check_line(line)
             if checked:
                 yield CHECKED, title
             else:
-                yield NEEDED, title
+                yield NEED, title
 
 def serialize_data(data, out):
     print >>out, "* ALL"
     for state, title in data:
-        if state == NOT_NEEDED:
+        if state == NOT_NEED:
             print >>out, "  - [ ] %s" % title.encode("utf-8")
-    print >>out, "** NEEDED"
+    print >>out, "** NEED"
     for state, title in data:
-        if state == NOT_NEEDED:
+        if state == NOT_NEED:
             continue
         print >>out, "   - [%s] %s" % \
             ("X" if state == CHECKED else " ", title.encode("utf-8"))
@@ -133,7 +133,7 @@ class CheckBoxDelegate(QStyledItemDelegate):
         opts = QStyleOptionButton() # QtGui.QStyleOptionViewItem()
         opts.rect = option.rect
         se_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, opts)
-        if data == NOT_NEEDED:
+        if data == NOT_NEED:
             bullet_rect = QRect(se_rect)
             if bullet_rect.width() > BULLET_SIZE:
                 bullet_rect.setLeft(
@@ -161,12 +161,14 @@ class CheckBoxDelegate(QStyledItemDelegate):
 class CheckListModel(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super(CheckListModel, self).__init__(parent)
+        self.settings = QSettings("fionbio", "i4checklist")
         self._updatePending = False
-        self._path = None
         model = QStandardItemModel(0, 2, self)
         self.setSourceModel(model)
         self.setDynamicSortFilter(True)
         self.set_show_all(False)
+        self.load_db_list()
+        self.load()
         self.connect(model, SIGNAL("dataChanged(QModelIndex, QModelIndex)"),
                     self._dataChanged)
         self.save_timer = QTimer()
@@ -178,34 +180,55 @@ class CheckListModel(QSortFilterProxyModel):
     def model(self):
         return self.sourceModel()
 
-    def load(self, path=None):
-        if path is not None:
-            self._path = path
-        if not self._path:
-            raise AssertionError("no path")
+    def db_dir(self):
+        return os.path.expanduser("~/MyDocs/.i4checklist")
+
+    def load_db_list(self):
+        self.databases = []
+        for filename in sorted(os.listdir(self.db_dir())):
+            path = os.path.join(self.db_dir(), filename)
+            if os.path.isfile(path):
+                self.databases.append(filename)
+        if not self.databases:
+            self.databases = ["default"]
+        self.current_db = self.databases[0]
+        self.settings.beginGroup("database")
+        try:
+            if self.settings.contains("current"):
+                cur = self.settings.value("current")
+                if cur in self.databases:
+                    self.current_db = cur
+        finally:
+            self.settings.endGroup()
+
+    def load(self, db_name=None):
+        if db_name is not None:
+            if not db_name in self.databases:
+                self.databases.append(db_name)
+                self.databases.sort()
+            self.current_db = db_name
+        path = os.path.join(self.db_dir(), self.current_db)
+        log.debug("load(): %s" % path)
         self.model.clear()
-        if not os.path.exists(self._path):
+        if not os.path.exists(path):
             return
-        with open(self._path) as f:
+        with open(path) as f:
             for state, title in parse_data(f):
                 self.model.appendRow(
                     [QStandardItem(str(state)), QStandardItem(title)])
 
-    def save(self, path=None):
-        if path is not None:
-            self._path = path
-        if not self._path:
-            return
-        log.debug("save(): %s" % self._path)
+    def save(self):
+        path = os.path.join(self.db_dir(), self.current_db)
+        log.debug("save(): %s" % path)
         self.cleanup()
-        if not os.path.exists(os.path.dirname(self._path)):
-            os.makedirs(os.path.dirname(self._path))
+        if not os.path.exists(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path))
         data = []
         for i in range(0, self.model.rowCount()):
             data.append((int(self.model.index(i, 0).data().toPyObject()),
                          unicode(self.model.index(i, 1).data().toPyObject())))
         data.sort()
-        with open(self._path, "wt+") as f:
+        with open(path, "wt+") as f:
             serialize_data(data, f)
         self.save_timer.stop()
 
@@ -231,10 +254,10 @@ class CheckListModel(QSortFilterProxyModel):
             value = int(index.data().toPyObject())
             if checkout:
                 if value == CHECKED:
-                    self.model.setData(index, NOT_NEEDED)
+                    self.model.setData(index, NOT_NEED)
             else:
                 if value == FRESH:
-                    self.model.setData(index, NEEDED)
+                    self.model.setData(index, NEED)
             i += 1
         self._updatePending = False
 
@@ -254,7 +277,7 @@ class CheckListModel(QSortFilterProxyModel):
             self.setFilterRegExp("")
         else:
             self.setFilterRegExp(
-                QRegExp("^%d|%d|%d$" % (FRESH, NEEDED, CHECKED)))
+                QRegExp("^%d|%d|%d$" % (FRESH, NEED, CHECKED)))
 
     def new(self):
         self.cleanup()
@@ -264,14 +287,14 @@ class CheckListModel(QSortFilterProxyModel):
 
     def toggle(self, row):
         value = int(self.index(row, 0).data().toPyObject())
-        if value in (FRESH, NOT_NEEDED):
-            value = NEEDED
-        elif value == NEEDED:
+        if value in (FRESH, NOT_NEED):
+            value = NEED
+        elif value == NEED:
             value = CHECKED
         elif self.show_all:
-            value = NOT_NEEDED
+            value = NOT_NEED
         else:
-            value = NEEDED
+            value = NEED
         self.setData(self.index(row, 0), value)
 
     def checkout(self):
@@ -292,23 +315,29 @@ class I4CheckWindow(QWidget):
         self.tableview.setItemDelegate(self.cbdelegate)
         self.tableview.setModel(self.model)
         self.tableview.sortByColumn(0, Qt.AscendingOrder)
-        self.tableview.resizeColumnToContents(1)
-        self.tableview.resizeRowsToContents()
-        self.tableview.horizontalHeader().setResizeMode(1, QHeaderView.Stretch)
-        self.tableview.horizontalHeader().resizeSection(1, 1)
-        self.tableview.horizontalHeader().hide()
-        self.tableview.resizeColumnToContents(0)
+        self.adjust_sizes()
         self.connect(self.tableview,
                      SIGNAL("clicked(const QModelIndex&)"),
-                     self.itemClicked)
+                     self.item_clicked)
 
         self.model.setHeaderData(0, Qt.Horizontal, u"")
         self.model.setHeaderData(1, Qt.Horizontal, u"Title")
 
         self.radio_all = QRadioButton("All")
-        self.radio_needed = QRadioButton("Needed")
-        self.radio_needed.setChecked(True)
+        self.radio_need = QRadioButton("Need")
+        self.radio_need.setChecked(True)
         self.connect(self.radio_all, SIGNAL("toggled(bool)"), self.set_show_all)
+
+        label = QLabel("Database:")
+        label.setFixedWidth(120)
+        label.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+
+        self.db_combo = QComboBox()
+        self.populate_db_combo()
+        self.connect(
+            self.db_combo, SIGNAL("currentIndexChanged(int)"),
+            self.db_index_changed)
+
         self.new_button = QPushButton("Add")
         self.connect(self.new_button, SIGNAL("clicked()"), self.new_item)
         self.checkout_button = QPushButton("Checkout")
@@ -318,7 +347,9 @@ class I4CheckWindow(QWidget):
         self.top_box = QHBoxLayout()
         self.top_box.setSpacing(0)
         self.top_box.addWidget(self.radio_all)
-        self.top_box.addWidget(self.radio_needed)
+        self.top_box.addWidget(self.radio_need)
+        self.top_box.addWidget(label)
+        self.top_box.addWidget(self.db_combo)
         self.box.addLayout(self.top_box)
         self.box.addWidget(self.tableview)
         self.button_box = QHBoxLayout()
@@ -336,14 +367,24 @@ class I4CheckWindow(QWidget):
             self.tableview.resizeRowToContents(_edit_index.row())
             self.tableview.edit(_edit_index)
 
+    def adjust_sizes(self):
+        log.debug("adjust_sizes()")
+        # TBD: I don't quite understand how to avoid the need
+        # to call this repeatedly ... perhaps QSS should be used
+        self.tableview.resizeColumnToContents(1)
+        self.tableview.resizeRowsToContents()
+        self.tableview.horizontalHeader().setResizeMode(1, QHeaderView.Stretch)
+        self.tableview.horizontalHeader().resizeSection(1, 1)
+        self.tableview.horizontalHeader().hide()
+        self.tableview.resizeColumnToContents(0)
+
     def setup_model(self):
         self.model = CheckListModel()
-        self.model.load(self.list_file_path())
         if not self.model.rowCount():
             return self.model.new()
         return None
 
-    def itemClicked(self, index):
+    def item_clicked(self, index):
         if index.column() > 0:
             return
         cur_index = self.tableview.currentIndex()
@@ -366,9 +407,6 @@ class I4CheckWindow(QWidget):
         self.model.save()
         super(I4CheckWindow, self).closeEvent(event)
 
-    def list_file_path(self):
-        return os.path.expanduser("~/MyDocs/.i4checklist/checklist.org")
-
     def checkout(self):
         if QMessageBox.question(
             self, "Checkout", "Are you sure you want to check out?",
@@ -376,8 +414,55 @@ class I4CheckWindow(QWidget):
             QMessageBox.Yes:
             self.model.checkout()
 
+    _loading_db_combo = False
+
+    def populate_db_combo(self):
+        self._loading_db_combo = True
+        try:
+            self.db_combo.clear()
+            for db_name in self.model.databases:
+                self.db_combo.addItem(re.sub("\\.org$", "", db_name), db_name)
+            self.db_combo.addItem("New database...", "")
+            self.db_combo.setCurrentIndex(
+                self.model.databases.index(self.model.current_db))
+        finally:
+            self._loading_db_combo = False
+
+    def db_index_changed(self, index):
+        if self._loading_db_combo:
+            return
+        db_name = str(self.db_combo.itemData(index).toPyObject())
+        if db_name == self.model.current_db:
+            return
+        if db_name:
+            self.model.load(db_name)
+            self.adjust_sizes()
+            return
+
+        db_name, ok = QInputDialog.getText(
+            self, "New Database", "Enter database name")
+        if ok and not re.match(r"^[\w-]+$", db_name):
+            QMessageBox.critical(
+                self, "Error",
+                "Database name must contain only the following chars: "
+                "A-Z a-z 0-9 _ -")
+            ok = False
+        if not ok:
+            self.db_combo.setCurrentIndex(
+                self.model.databases.index(self.model.current_db))
+            return
+        db_name = str(db_name) + ".org"
+        self.model.load(db_name)
+        self.populate_db_combo()
+        self.adjust_sizes()
+
+# TBD: validate db names
 # TBD: remove/separate test code
 # TBD: reduce N of redundant saves
+# TBD: main menu (remove database, etc.)
+# TBD: style using qss
+# TBD: don't crash on parse errors
+
 #test_it()
 logging.basicConfig(level=logging.DEBUG)
 app = QApplication(sys.argv)
