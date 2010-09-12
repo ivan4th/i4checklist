@@ -343,6 +343,7 @@ class I4CheckWindow(QWidget):
         self.tableview.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.cbdelegate = CheckBoxDelegate()
         self.tableview.setItemDelegate(self.cbdelegate)
+        self.tableview.setAutoScroll(False)
         self.tableview.setModel(self.model)
         self.tableview.sortByColumn(0, Qt.AscendingOrder)
         self.adjust_headers()
