@@ -232,7 +232,7 @@ class CheckListModel(QSortFilterProxyModel):
             return NEED
 
     def make_row(self, state, title):
-        item = QStandardItem(title)
+        item = QStandardItem(title) if title else QStandardItem()
         item.setFlags(
             Qt.ItemIsUserCheckable | Qt.ItemIsTristate | Qt.ItemIsEnabled |
             Qt.ItemIsEditable)
@@ -326,7 +326,7 @@ class CheckListModel(QSortFilterProxyModel):
 
     def new(self):
         self.cleanup()
-        self.model.insertRow(0, self.make_row(NEED, ""))
+        self.model.insertRow(0, self.make_row(NEED, None))
         self.save_timer.stop()
         return self.mapFromSource(self.model.index(0, 0))
 
@@ -405,6 +405,7 @@ class I4CheckWindow(QWidget):
         if self.model.model.rowCount() == 0:
             edit_index = self.model.new()
             self.tableview.setCurrentIndex(edit_index)
+            self.tableview.scrollTo(edit_index)
             self.tableview.edit(edit_index)
 
     def adjust_headers(self):
@@ -422,6 +423,7 @@ class I4CheckWindow(QWidget):
         index = self.model.new()
         self.tableview.setCurrentIndex(index)
         self.tableview.resizeRowToContents(index.row())
+        self.tableview.scrollTo(index)
         self.tableview.edit(index)
 
     def set_show_all(self, show_all):
@@ -533,6 +535,8 @@ class I4CheckMainWindow(QMainWindow):
             "(c) Copyright Ivan Shvedunov 2010")
 
 # TBD: QSortFilterProxyModel still fscks up unpredictably after setFilterRegExp()...
+# TBD: reset: like checkout, but resets everything, not just checked items
+# TBD: use pale color for checked items
 # TBD: disable checkout menu item when there are no checked items
 # TBD: separate logic, write more tests
 # TBD: reduce N of redundant saves
