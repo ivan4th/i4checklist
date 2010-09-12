@@ -35,10 +35,9 @@ def parse_check_line(line):
         raise ParseError("expected check line, got %r" % line)
     return bool(m.group(1).strip()), m.group(2).decode("utf-8")
 
-FRESH = 0
-NOT_NEEDED = 1
-NEED = 2
-CHECKED = 3
+NOT_NEEDED = 0
+NEED = 1
+CHECKED = 2
 
 CHECK_FIELD_WIDTH = 60
 ITEM_HEIGHT = 60
@@ -91,51 +90,48 @@ def test_it():
 
 class CheckBoxDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
-        if index.column() > 0:
-            editor = super(CheckBoxDelegate, self). \
-                createEditor(parent, option, index)
-            if editor is not None:
-                editor.setInputMethodHints(Qt.ImhNoAutoUppercase)
-            return editor
-        return None
-
-    def sizeHint(self, option, index):
-        size = QSize(super(CheckBoxDelegate, self).sizeHint(option, index))
-        if index.column() == 0:
-            size.setWidth(CHECK_FIELD_WIDTH)
-        size.setHeight(ITEM_HEIGHT)
-        return size
+        editor = super(CheckBoxDelegate, self). \
+            createEditor(parent, option, index)
+        if editor is not None:
+            editor.setInputMethodHints(Qt.ImhNoAutoUppercase)
+        return editor
 
     def paint(self, painter, option, index):
         self.initStyleOption(option, index)
-        if index.column() > 0:
-            self.paint_text(painter, option, index)
-        else:
-            self.paint_checkbox(painter, option, index)
-
-    def paint_text(self, painter, option, index):
-        if int(index.model().index(index.row(), 0).data().toPyObject()) == \
-                CHECKED:
-            option.font = QFont(option.font)
-            option.font.setStrikeOut(True)
-        QApplication.style().drawControl(
-            QStyle.CE_ItemViewItem, option, painter,
-            getattr(option, "widget", None))
-
-    def paint_checkbox(self, painter, option, index):
+        if hasattr(option, "checkState"):
+            if option.checkState == Qt.Unchecked:
+                option.checkState = Qt.PartiallyChecked
+            elif option.checkState == Qt.PartiallyChecked:
+                option.checkState = Qt.Unchecked
+            elif option.checkState == Qt.Checked:
+                option.font = QFont(option.font)
+                option.font.setStrikeOut(True)
+        # ref: qt4-x11-4.6.2/src/gui/styles/qcommonstyle.cpp
+        painter.save()
+        painter.setClipRect(option.rect)
+        # QApplication.style().drawControl(
+        #     QStyle.CE_ItemViewItem, option, painter,
+        #     getattr(option, "widget", None))
         style = QApplication.style()
-        option.text = ""
-        style.drawControl(
-            QStyle.CE_ItemViewItem, option, painter,
-            getattr(option, "widget", None))
-        data = int(index.data().toPyObject())
-        if data == FRESH:
-            return
-        opts = QStyleOptionButton() # QtGui.QStyleOptionViewItem()
-        opts.rect = option.rect
-        se_rect = style.subElementRect(QStyle.SE_CheckBoxIndicator, opts)
-        if data == NOT_NEEDED:
-            bullet_rect = QRect(se_rect)
+        widget = getattr(option, "widget", None)
+        # log.debug("widget: %r style: %r" % (widget, style.metaObject().className()))
+        style.drawPrimitive(
+            QStyle.PE_PanelItemViewItem, option, painter, widget)
+
+        text_rect = style.subElementRect(
+            QStyle.SE_ItemViewItemText, option, widget)
+        item_text = option.fontMetrics.elidedText(
+            option.text, option.textElideMode, text_rect.width())
+        painter.setFont(option.font)
+        style.drawItemText(painter, text_rect, option.displayAlignment,
+                           option.palette, True, item_text, QPalette.Text)
+
+        check_rect = style.subElementRect(
+            QStyle.SE_ItemViewItemCheckIndicator, option, widget)
+        if option.checkState == Qt.PartiallyChecked:
+            brush = option.palette.brush(QPalette.Base)
+            painter.fillRect(check_rect, brush)
+            bullet_rect = QRect(check_rect)
             if bullet_rect.width() > BULLET_SIZE:
                 bullet_rect.setLeft(
                     bullet_rect.left() +
@@ -146,18 +142,21 @@ class CheckBoxDelegate(QStyledItemDelegate):
                     bullet_rect.top() +
                     (bullet_rect.height() - BULLET_SIZE) / 2)
                 bullet_rect.setHeight(BULLET_SIZE)
-            painter.save()
             painter.setPen(QPen(option.palette.color(QPalette.Text)))
             painter.setBrush(option.palette.brush(QPalette.Text))
             painter.drawEllipse(bullet_rect)
-            painter.restore()
-            return
-        if data == CHECKED:
-            opts.state |= QStyle.State_On | QStyle.State_Enabled
         else:
-            opts.state |= QStyle.State_Off | QStyle.State_Enabled
-        opts.rect = se_rect
-        style.drawPrimitive(QStyle.PE_IndicatorCheckBox, opts, painter)
+            check_opt = QStyleOptionButton()
+            check_opt.rect = check_rect
+            check_opt.state = option.state & ~QStyle.State_HasFocus
+            if option.checkState == Qt.Checked:
+                check_opt.state |= QStyle.State_On
+            else:
+                check_opt.state |= QStyle.State_Off
+            style.drawPrimitive(
+                QStyle.PE_IndicatorItemViewItemCheck, check_opt, painter,
+                widget)
+        painter.restore()
 
 class CheckListModel(QSortFilterProxyModel):
     # FIXME: should not use the proxy. just implement the real model
@@ -165,12 +164,17 @@ class CheckListModel(QSortFilterProxyModel):
         super(CheckListModel, self).__init__(parent)
         self.settings = QSettings("fionbio", "i4checklist")
         self._updatePending = False
-        model = QStandardItemModel(0, 2, self)
-        self.setSourceModel(model)
+        model = QStandardItemModel(0, 1, self)
+        self.setFilterRole(Qt.CheckStateRole)
+        self.setSortRole(Qt.CheckStateRole)
         self.setDynamicSortFilter(True)
-        self.set_show_all(False)
+        self.setSourceModel(model)
+        # setting filter regexp to non-empty pattern
+        # causes the proxy to fail to sort its items
+        self.set_show_all(True)
         self.load_db_list()
         self.load()
+        self.sort(0, Qt.AscendingOrder)
         self.connect(model, SIGNAL("dataChanged(QModelIndex, QModelIndex)"),
                      self._dataChanged)
         self.save_timer = QTimer()
@@ -181,6 +185,12 @@ class CheckListModel(QSortFilterProxyModel):
     @property
     def model(self):
         return self.sourceModel()
+
+    def setData(self, index, value, role):
+        if not self.show_all and role == Qt.CheckStateRole and \
+                value == Qt.Unchecked:
+            value = Qt.PartiallyChecked
+        return super(CheckListModel, self).setData(index, value, role)
 
     def db_dir(self):
         return os.path.expanduser("~/MyDocs/.i4checklist")
@@ -205,6 +215,30 @@ class CheckListModel(QSortFilterProxyModel):
         finally:
             self.settings.endGroup()
 
+    def state_to_check_state(self, state):
+        if state == NOT_NEEDED:
+            return Qt.Unchecked
+        elif state == CHECKED:
+            return Qt.Checked
+        else: # NEED
+            return Qt.PartiallyChecked
+
+    def check_state_to_state(self, check_state):
+        if check_state == Qt.Unchecked:
+            return NOT_NEEDED
+        elif check_state == Qt.Checked:
+            return CHECKED
+        else: # NEED
+            return NEED
+
+    def make_row(self, state, title):
+        item = QStandardItem(title)
+        item.setFlags(
+            Qt.ItemIsUserCheckable | Qt.ItemIsTristate | Qt.ItemIsEnabled |
+            Qt.ItemIsEditable)
+        item.setData(self.state_to_check_state(state), Qt.CheckStateRole)
+        return [item]
+
     def load(self, db_name=None):
         if db_name is not None:
             if not db_name in self.databases:
@@ -223,8 +257,7 @@ class CheckListModel(QSortFilterProxyModel):
             return
         with open(path) as f:
             for state, title in parse_data(f):
-                self.model.appendRow(
-                    [QStandardItem(str(state)), QStandardItem(title)])
+                self.model.appendRow(self.make_row(state, title))
 
     def save(self):
         path = os.path.join(self.db_dir(), self.current_db)
@@ -234,8 +267,11 @@ class CheckListModel(QSortFilterProxyModel):
             os.makedirs(os.path.dirname(path))
         data = []
         for i in range(0, self.model.rowCount()):
-            data.append((int(self.model.index(i, 0).data().toPyObject()),
-                         unicode(self.model.index(i, 1).data().toPyObject())))
+            index = self.model.index(i, 0)
+            v1 = self.check_state_to_state(
+                index.data(Qt.CheckStateRole).toPyObject())
+            v2 = unicode(index.data().toPyObject())
+            data.append((v1, v2))
         data.sort()
         with open(path, "wt+") as f:
             serialize_data(data, f)
@@ -253,39 +289,32 @@ class CheckListModel(QSortFilterProxyModel):
         if not self._updatePending:
             self._updatePending = True
             QTimer.singleShot(1, self.cleanup)
-        elif top_left.column() <= 1 and bottom_right.column() >= 1:
-            pass # TBD: fix this
         self.save_timer.start()
 
     def cleanup(self, checkout=False):
         i = 0
         while i < self.model.rowCount():
-            value = self.model.index(i, 1).data().toPyObject()
+            index = self.model.index(i, 0)
+            value = index.data().toPyObject()
             value = value and unicode(value).strip()
             if not value:
                 self.model.removeRow(i)
                 continue
-            index = self.model.index(i, 0)
-            value = int(index.data().toPyObject())
-            if checkout:
-                if value == CHECKED:
-                    self.model.setData(index, NOT_NEEDED)
-            else:
-                if value == FRESH:
-                    self.model.setData(index, NEED)
+            check_value = int(index.data(Qt.CheckStateRole).toPyObject())
+            if checkout and check_value == Qt.Checked:
+                    self.model.setData(
+                        index, Qt.Unchecked, Qt.CheckStateRole)
             i += 1
         self._updatePending = False
 
     def lessThan(self, left, right):
+        # log.debug("left %d %d right %d %d" % (left.row(), left.column(), right.row(), right.column()))
         r = super(CheckListModel, self).lessThan(left, right)
-        log.debug("left %d %d right %d %d" % (left.row(), left.column(), right.row(), right.column()))
-        if r or left.column() or right.column():
-            return r
+        if r:
+            return True
         if super(CheckListModel, self).lessThan(right, left):
             return False
-        new_left = self.model.index(left.row(), 1)
-        new_right = self.model.index(right.row(), 1)
-        return super(CheckListModel, self).lessThan(new_left, new_right)
+        return unicode(left.data().toPyObject()) < unicode(right.data().toPyObject())
 
     def set_show_all(self, show_all):
         self.show_all = show_all
@@ -293,25 +322,13 @@ class CheckListModel(QSortFilterProxyModel):
             self.setFilterRegExp("")
         else:
             self.setFilterRegExp(
-                QRegExp("^%d|%d|%d$" % (FRESH, NEED, CHECKED)))
+                QRegExp("^%d|%d$" % (Qt.Checked, Qt.PartiallyChecked)))
 
     def new(self):
         self.cleanup()
-        self.model.insertRow(0, [QStandardItem(str(FRESH)), QStandardItem()])
+        self.model.insertRow(0, self.make_row(NEED, ""))
         self.save_timer.stop()
-        return self.mapFromSource(self.model.index(0, 1))
-
-    def toggle(self, row):
-        value = int(self.index(row, 0).data().toPyObject())
-        if value in (FRESH, NOT_NEEDED):
-            value = NEED
-        elif value == NEED:
-            value = CHECKED
-        elif self.show_all:
-            value = NOT_NEEDED
-        else:
-            value = NEED
-        self.setData(self.index(row, 0), value)
+        return self.mapFromSource(self.model.index(0, 0))
 
     def checkout(self):
         self.cleanup(True)
@@ -329,16 +346,13 @@ class I4CheckWindow(QWidget):
         self.tableview.setModel(self.model)
         self.tableview.sortByColumn(0, Qt.AscendingOrder)
         self.adjust_headers()
-        self.connect(self.tableview,
-                     SIGNAL("clicked(const QModelIndex&)"),
-                     self.item_clicked)
 
         #self.model.setHeaderData(0, Qt.Horizontal, u"")
         #self.model.setHeaderData(1, Qt.Horizontal, u"Title")
 
         self.radio_all = QRadioButton("All")
+        self.radio_all.setChecked(True)
         self.radio_need = QRadioButton("Need")
-        self.radio_need.setChecked(True)
         self.connect(self.radio_all, SIGNAL("toggled(bool)"), self.set_show_all)
 
         label = QLabel("DB:")
@@ -385,22 +399,14 @@ class I4CheckWindow(QWidget):
 
     def adjust_headers(self):
         log.debug("adjust_sizes()")
-        self.tableview.setColumnWidth(0, CHECK_FIELD_WIDTH)
-        self.tableview.horizontalHeader().setResizeMode(1, QHeaderView.Stretch)
-        self.tableview.setColumnWidth(1, 1)
+        self.tableview.horizontalHeader().setResizeMode(0, QHeaderView.Stretch)
+        self.tableview.setColumnWidth(0, 1)
         self.tableview.verticalHeader().setDefaultSectionSize(ITEM_HEIGHT)
         self.tableview.verticalHeader().hide()
         self.tableview.horizontalHeader().hide()
 
     def setup_model(self):
         self.model = CheckListModel()
-
-    def item_clicked(self, index):
-        if index.column() > 0:
-            return
-        cur_index = self.tableview.currentIndex()
-        self.model.toggle(index.row())
-        self.tableview.setCurrentIndex(cur_index)
 
     def new_item(self):
         index = self.model.new()
@@ -516,7 +522,7 @@ class I4CheckMainWindow(QMainWindow):
             "inspired by Handy Shopper for Palm OS.\n\n"
             "(c) Copyright Ivan Shvedunov 2010")
 
-# TBD: disable checkout button when there are no checked items
+# TBD: disable checkout menu item when there are no checked items
 # TBD: remove/separate test code
 # TBD: reduce N of redundant saves
 # TBD: main menu (remove database, etc.)
