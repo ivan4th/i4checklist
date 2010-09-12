@@ -5,7 +5,7 @@ import re
 import sys
 import os.path
 #from PySide import QtCore, QtGui #, QtMaemo5
-from PyQt4.QtCore import Qt, QRect, QSize, QTimer, QRegExp, QSettings, SIGNAL
+from PyQt4.QtCore import Qt, QRect, QTimer, QRegExp, QSettings, SIGNAL
 from PyQt4.QtGui import QApplication, QStyledItemDelegate, QPalette, \
     QStyle, QStyleOptionButton, QPen, QWidget, QStandardItemModel, \
     QStandardItem, QTableView, QAbstractItemView, QPushButton, \
@@ -118,6 +118,8 @@ class CheckBoxDelegate(QStyledItemDelegate):
         style.drawPrimitive(
             QStyle.PE_PanelItemViewItem, option, painter, widget)
 
+        if option.checkState == Qt.Checked:
+            painter.setOpacity(0.3)
         text_rect = style.subElementRect(
             QStyle.SE_ItemViewItemText, option, widget)
         item_text = option.fontMetrics.elidedText(
@@ -291,7 +293,7 @@ class CheckListModel(QSortFilterProxyModel):
             QTimer.singleShot(1, self.cleanup)
         self.save_timer.start()
 
-    def cleanup(self, checkout=False):
+    def cleanup(self, check_values=None):
         i = 0
         while i < self.model.rowCount():
             index = self.model.index(i, 0)
@@ -301,9 +303,8 @@ class CheckListModel(QSortFilterProxyModel):
                 self.model.removeRow(i)
                 continue
             check_value = int(index.data(Qt.CheckStateRole).toPyObject())
-            if checkout and check_value == Qt.Checked:
-                    self.model.setData(
-                        index, Qt.Unchecked, Qt.CheckStateRole)
+            if check_values and check_value in check_values:
+                self.model.setData(index, Qt.Unchecked, Qt.CheckStateRole)
             i += 1
         self._updatePending = False
 
@@ -331,7 +332,10 @@ class CheckListModel(QSortFilterProxyModel):
         return self.mapFromSource(self.model.index(0, 0))
 
     def checkout(self):
-        self.cleanup(True)
+        self.cleanup((Qt.Checked,))
+
+    def reset_items(self):
+        self.cleanup((Qt.Checked, Qt.PartiallyChecked))
 
     def need_anything(self):
         for i in range(0, self.model.rowCount()):
@@ -442,6 +446,14 @@ class I4CheckWindow(QWidget):
             QMessageBox.Yes:
             self.model.checkout()
 
+    def reset_items(self):
+        if QMessageBox.question(
+            self, "Checkout", "Are you sure you want to reset the list?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == \
+            QMessageBox.Yes:
+            self.model.reset_items()
+            self.radio_all.setChecked(True)
+
     def delete_database(self):
         if QMessageBox.question(
             self, "Delete database",
@@ -518,12 +530,15 @@ class I4CheckMainWindow(QMainWindow):
     def setup_menu(self):
         self.act_checkout = QAction(self.tr('Checkout'), self)
         self.act_checkout.triggered.connect(self.checklist.checkout)
+        self.act_reset = QAction(self.tr('Reset'), self)
+        self.act_reset.triggered.connect(self.checklist.reset_items)
         self.act_del_db = QAction(self.tr('Delete database'), self)
         self.act_del_db.triggered.connect(self.checklist.delete_database)
         self.act_about = QAction(self.tr('About'), self)
         self.act_about.triggered.connect(self.about)
         menu_bar = self.menuBar()
         menu_bar.addAction(self.act_checkout)
+        menu_bar.addAction(self.act_reset)
         menu_bar.addAction(self.act_del_db)
         menu_bar.addAction(self.act_about)
 
@@ -535,8 +550,7 @@ class I4CheckMainWindow(QMainWindow):
             "(c) Copyright Ivan Shvedunov 2010")
 
 # TBD: QSortFilterProxyModel still fscks up unpredictably after setFilterRegExp()...
-# TBD: reset: like checkout, but resets everything, not just checked items
-# TBD: use pale color for checked items
+# TBD: onscreen keyboard compatibility
 # TBD: disable checkout menu item when there are no checked items
 # TBD: separate logic, write more tests
 # TBD: reduce N of redundant saves
