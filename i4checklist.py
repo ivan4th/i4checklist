@@ -333,6 +333,15 @@ class CheckListModel(QSortFilterProxyModel):
     def checkout(self):
         self.cleanup(True)
 
+    def need_anything(self):
+        for i in range(0, self.model.rowCount()):
+            index = self.model.index(i, 0)
+            v = self.check_state_to_state(
+                index.data(Qt.CheckStateRole).toPyObject())
+            if v != NOT_NEEDED:
+                return True
+        return False
+
 class I4CheckWindow(QWidget):
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
@@ -389,7 +398,7 @@ class I4CheckWindow(QWidget):
         self.dwim_after_load()
 
     def dwim_after_load(self):
-        if self.model.rowCount() > 0:
+        if self.model.need_anything():
             self.radio_need.setChecked(True)
             return
         self.radio_all.setChecked(True)
@@ -523,8 +532,9 @@ class I4CheckMainWindow(QMainWindow):
             "inspired by Handy Shopper for Palm OS.\n\n"
             "(c) Copyright Ivan Shvedunov 2010")
 
+# TBD: QSortFilterProxyModel still fscks up unpredictably after setFilterRegExp()...
 # TBD: disable checkout menu item when there are no checked items
-# TBD: remove/separate test code
+# TBD: separate logic, write more tests
 # TBD: reduce N of redundant saves
 # TBD: main menu (remove database, etc.)
 # TBD: style using qss
